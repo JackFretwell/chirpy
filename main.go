@@ -13,6 +13,13 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 }
 
+
+func healthCheck(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -106,12 +113,7 @@ func main() {
 	cfg := apiConfig{}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
+	mux.HandleFunc("GET /api/healthz", healthCheck)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
