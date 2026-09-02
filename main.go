@@ -1,6 +1,6 @@
 package main
 
-import(
+import (
 	"net/http"
 	"time"
 	"log"
@@ -8,10 +8,17 @@ import(
 	"fmt"
 	"encoding/json"
 	"strings"
+	"os"
+	"database/sql"
+	"github.com/joho/godotenv"
+	"github.com/JackFretwell/chirpy/internal/database"
 )
+
+import _ "github.com/lib/pq"
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries *database.Queries
 }
 
 
@@ -124,7 +131,16 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Println("Error opening datbase", err)
+	}
+	dbQueries := database.New(db)
+
 	cfg := apiConfig{}
+	cfg.dbQueries = dbQueries
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", healthCheck)
