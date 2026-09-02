@@ -7,6 +7,7 @@ import(
 	"sync/atomic"
 	"fmt"
 	"encoding/json"
+	"strings"
 )
 
 type apiConfig struct {
@@ -45,13 +46,24 @@ func (cfg *apiConfig) resetFileserverHits (w http.ResponseWriter, req *http.Requ
 	cfg.fileserverHits.Store(0)
 }
 
+func profanityFilter(s string) string {
+	splitString := strings.Split(s, " ")
+	for i := 0; i < len(splitString); i++ {
+		if strings.ToLower(splitString[i]) == "kerfuffle" || strings.ToLower(splitString[i]) == "sharbert" || strings.ToLower(splitString[i]) == "fornax" {
+			splitString[i] = "****"
+		}
+	}
+
+	return strings.Join(splitString, " ")
+}
+
 func validateChirp(w http.ResponseWriter, req *http.Request) {
 	type chirpBody struct {
 		Body string `json:"body"`
 	}
 
 	type chirpValid struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(req.Body)
@@ -67,8 +79,10 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	cleanText := profanityFilter(c.Body)
+
 	respBody := chirpValid{
-		Valid: true,
+		CleanedBody: cleanText,
 	}
 
 	respondWithJSON(w, 200, respBody)
