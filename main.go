@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"github.com/joho/godotenv"
 	"github.com/JackFretwell/chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 import _ "github.com/lib/pq"
@@ -19,6 +20,14 @@ import _ "github.com/lib/pq"
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
+	platform string
+}
+
+type User struct {
+	ID			uuid.UUID `json:"id"`
+	CreatedAt	time.Time `json:"created_at"`
+	UpdatedAt	time.Time `json:"updated_at"`
+	Email		string	  `json:"email"`
 }
 
 
@@ -51,6 +60,17 @@ func (cfg *apiConfig) writeNumberOfRequests(w http.ResponseWriter, req *http.Req
 
 func (cfg *apiConfig) resetFileserverHits (w http.ResponseWriter, req *http.Request) {
 	cfg.fileserverHits.Store(0)
+	if cfg.platform == "dev"{
+		err := cfg.dbQueries.DeleteUsers(req.Context())
+		if err != nil {
+			respondWithError(w, 400, "An occured when deleting users from the database")
+			return
+		}
+	} else {
+		respondWithError(w, 403, "This command is forbidden in a production environment")
+		return
+	}
+
 }
 
 func profanityFilter(s string) string {
@@ -129,6 +149,35 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
+	type createUser struct {
+		Email	string	`json:"email"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	c := createUser{}
+	err := decoder.Decode(&c)
+	if err != nil {
+		respondWithError(w, 400, "An occured when decoding the user's email")
+		return
+	}
+
+	createdUser, err := cfg.dbQueries.CreateUser(req.Context(), c.Email)
+	if err != nil {
+		respondWithError(w, 400, "An occured when creating the user")
+		return
+	}
+
+	u := User{
+		ID:		   createdUser.ID,
+		CreatedAt: createdUser.CreatedAt,
+		UpdatedAt: createdUser.UpdatedAt,
+		Email:	   createdUser.Email,
+	}
+
+	respondWithJSON(w, 201, u)
+}
+
 
 func main() {
 	godotenv.Load()
@@ -141,10 +190,13 @@ func main() {
 
 	cfg := apiConfig{}
 	cfg.dbQueries = dbQueries
+	cfg.platform = os.Getenv("PLATFORM")
+	
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", healthCheck)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	mux.HandleFunc("POST /api/users", cfg.createUser)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
