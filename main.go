@@ -30,6 +30,14 @@ type User struct {
 	Email		string	  `json:"email"`
 }
 
+type Chirp struct {
+	ID			uuid.UUID `json:"id"`
+	CreatedAt	time.Time `json:"created_at"`
+	UpdatedAt	time.Time `json:"updated_at"`
+	Body		string	  `json:"body"`
+	UserID		uuid.UUID `json:"user_id"`
+}
+
 
 func healthCheck(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -90,14 +98,6 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 		UserID 	uuid.UUID 	`json:"user_id"`
 	}
 
-	type chirp struct {
-		ID			uuid.UUID `json:"id"`
-		CreatedAt	time.Time `json:"created_at"`
-		UpdatedAt	time.Time `json:"updated_at"`
-		Body		string	  `json:"body"`
-		UserID		uuid.UUID `json:"user_id"`
-	}
-
 	decoder := json.NewDecoder(req.Body)
 	c := chirpValid{}
 	err := decoder.Decode(&c)
@@ -124,7 +124,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 		return
 	} 
 
-	respBody := chirp{
+	respBody := Chirp{
 		ID: 	   createdChirp.ID,
 		CreatedAt: createdChirp.CreatedAt,
 		UpdatedAt: createdChirp.UpdatedAt,
@@ -178,13 +178,13 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
 	c := createUser{}
 	err := decoder.Decode(&c)
 	if err != nil {
-		respondWithError(w, 400, "An occured when decoding the user's email")
+		respondWithError(w, 400, "An error occured when decoding the user's email")
 		return
 	}
 
 	createdUser, err := cfg.dbQueries.CreateUser(req.Context(), c.Email)
 	if err != nil {
-		respondWithError(w, 400, "An occured when creating the user")
+		respondWithError(w, 400, "An error occured when creating the user")
 		return
 	}
 
@@ -198,13 +198,37 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, 201, u)
 }
 
+func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
+	chirps, err := cfg.dbQueries.RetrieveChirps(req.Context())
+	if err != nil {
+		respondWithError(w, 400, "An error occured when retrieving chirps")
+		return
+	}
+
+	chirpArray := make([]Chirp, len(chirps))
+
+	for i := 0; i < len(chirps); i++ {
+		c := Chirp{
+			ID: 	   chirps[i].ID,
+			CreatedAt: chirps[i].CreatedAt,
+			UpdatedAt: chirps[i].UpdatedAt,
+			Body:	   chirps[i].Body,
+			UserID:	   chirps[i].UserID,
+		}
+		chirpArray[i] = c
+	}
+	
+	respondWithJSON(w, 200, chirpArray)
+}
+
+
 
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		fmt.Println("Error opening datbase", err)
+		fmt.Println("An error occurred when opening the database", err)
 	}
 	dbQueries := database.New(db)
 
@@ -217,6 +241,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthCheck)
 	mux.HandleFunc("POST /api/users", cfg.createUser)
 	mux.HandleFunc("POST /api/chirps", cfg.createChirp)
+	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
