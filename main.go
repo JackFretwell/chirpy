@@ -84,17 +84,22 @@ func profanityFilter(s string) string {
 	return strings.Join(splitString, " ")
 }
 
-func validateChirp(w http.ResponseWriter, req *http.Request) {
-	type chirpBody struct {
-		Body string `json:"body"`
+func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
+	type chirpValid struct {
+		Body 	string 		`json:"body"`
+		UserID 	uuid.UUID 	`json:"user_id"`
 	}
 
-	type chirpValid struct {
-		CleanedBody string `json:"cleaned_body"`
+	type chirp struct {
+		ID			uuid.UUID `json:"id"`
+		CreatedAt	time.Time `json:"created_at"`
+		UpdatedAt	time.Time `json:"updated_at"`
+		Body		string	  `json:"body"`
+		UserID		uuid.UUID `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(req.Body)
-	c := chirpBody{}
+	c := chirpValid{}
 	err := decoder.Decode(&c)
 	if err != nil {
 		respondWithError(w, 400, "An occured when decoding the Chirp")
@@ -108,11 +113,26 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 
 	cleanText := profanityFilter(c.Body)
 
-	respBody := chirpValid{
-		CleanedBody: cleanText,
+	params := database.CreateChirpParams{
+		Body: cleanText,
+		UserID: c.UserID,
 	}
 
-	respondWithJSON(w, 200, respBody)
+	createdChirp, err := cfg.dbQueries.CreateChirp(req.Context(), params)
+	if err != nil {
+		respondWithError(w, 400, "An occured when creating the Chirp in our database")
+		return
+	} 
+
+	respBody := chirp{
+		ID: 	   createdChirp.ID,
+		CreatedAt: createdChirp.CreatedAt,
+		UpdatedAt: createdChirp.UpdatedAt,
+		Body:	   createdChirp.Body,
+		UserID:	   createdChirp.UserID,
+	}
+
+	respondWithJSON(w, 201, respBody)
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
@@ -195,8 +215,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", healthCheck)
-	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("POST /api/users", cfg.createUser)
+	mux.HandleFunc("POST /api/chirps", cfg.createChirp)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
