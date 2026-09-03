@@ -221,6 +221,25 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, 200, chirpArray)
 }
 
+func (cfg *apiConfig) retrieveSpecificChirp(w http.ResponseWriter, req *http.Request){
+	chirpID := req.PathValue("chirpID")
+	uuid, _ := uuid.Parse(chirpID)
+	chirp, err := cfg.dbQueries.RetrieveChirp(req.Context(), uuid)
+	if err != nil {
+		respondWithError(w, 404, "An error occured when retrieving the given chirp")
+		return
+	}
+
+	c := Chirp{
+		ID: 	   chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:	   chirp.Body,
+		UserID:	   chirp.UserID,
+	}
+
+	respondWithJSON(w, 200, c)
+}
 
 
 func main() {
@@ -242,6 +261,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", cfg.createUser)
 	mux.HandleFunc("POST /api/chirps", cfg.createChirp)
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveSpecificChirp)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
