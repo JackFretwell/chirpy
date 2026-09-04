@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"github.com/joho/godotenv"
 	"github.com/JackFretwell/chirpy/internal/database"
+	"github.com/JackFretwell/chirpy/internal/auth"
 	"github.com/google/uuid"
 )
 
@@ -36,6 +37,11 @@ type Chirp struct {
 	UpdatedAt	time.Time `json:"updated_at"`
 	Body		string	  `json:"body"`
 	UserID		uuid.UUID `json:"user_id"`
+}
+
+type createUserParams struct {
+	Password string `json:"password"`
+	Email	string	`json:"email"`
 }
 
 
@@ -170,29 +176,36 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
-	type createUser struct {
-		Email	string	`json:"email"`
-	}
-
 	decoder := json.NewDecoder(req.Body)
-	c := createUser{}
+	c := createUserParams{}
 	err := decoder.Decode(&c)
 	if err != nil {
 		respondWithError(w, 400, "An error occured when decoding the user's email")
 		return
 	}
 
-	createdUser, err := cfg.dbQueries.CreateUser(req.Context(), c.Email)
+	hash, err := auth.HashPassword(c.Password)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when hashing the user's password")
+		return
+	}
+
+	params := database.CreateUserParams{
+		Email: c.Email,
+		HashedPassword: hash,
+	}
+
+	createdUser, err := cfg.dbQueries.CreateUser(req.Context(), params)
 	if err != nil {
 		respondWithError(w, 400, "An error occured when creating the user")
 		return
 	}
 
 	u := User{
-		ID:		   createdUser.ID,
-		CreatedAt: createdUser.CreatedAt,
-		UpdatedAt: createdUser.UpdatedAt,
-		Email:	   createdUser.Email,
+		ID:		   		createdUser.ID,
+		CreatedAt: 		createdUser.CreatedAt,
+		UpdatedAt: 		createdUser.UpdatedAt,
+		Email:	   		createdUser.Email,
 	}
 
 	respondWithJSON(w, 201, u)
@@ -241,6 +254,35 @@ func (cfg *apiConfig) retrieveSpecificChirp(w http.ResponseWriter, req *http.Req
 	respondWithJSON(w, 200, c)
 }
 
+func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
+	decoder := json.NewDecoder(req.Body)
+	c := createUserParams{}
+	err := decoder.Decode(&c)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when decoding the user's email")
+		return
+	}
+
+	user, err := cfg.dbQueries.FindUserByEmail(req.Context(), c.Email)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email or password")
+		return
+	}
+
+	match, err := auth.CheckPasswordHash(c.Password, user.HashedPassword)
+	if !match {
+		respondWithError(w, 401, "Incorrect email or password")
+		return
+	}
+
+	u := User{
+		ID:		   		user.ID,
+		CreatedAt: 		user.CreatedAt,
+		UpdatedAt: 		user.UpdatedAt,
+		Email:	   		user.Email,
+	}
+	respondWithJSON(w, 200, u)
+}
 
 func main() {
 	godotenv.Load()
@@ -262,6 +304,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", cfg.createChirp)
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveSpecificChirp)
+	mux.HandleFunc("POST /api/login", cfg.userLogin)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
