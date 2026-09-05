@@ -6,9 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-//func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error)
-//func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) 
-
 func TestValidateJWTPositive(t *testing.T) {
 	userID := uuid.New()
 	tokenSecret := "devtokensecret"
@@ -54,4 +51,10 @@ func TestValidateJWTMalformedToken(t *testing.T) {
 	if err == nil {
 		t.Error("Validating a malformed token should result in an error")
 	}
+}
+
+//func GetBearerToken(headers http.Header) (string, error) {
+
+func TestGetBearerToken(t *testing.T) {
+	
 }

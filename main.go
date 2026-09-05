@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
 	platform string
+	secret string
 }
 
 type User struct {
@@ -29,6 +30,7 @@ type User struct {
 	CreatedAt	time.Time `json:"created_at"`
 	UpdatedAt	time.Time `json:"updated_at"`
 	Email		string	  `json:"email"`
+	Token		string	  `json:"token"`
 }
 
 type Chirp struct {
@@ -40,8 +42,9 @@ type Chirp struct {
 }
 
 type createUserParams struct {
-	Password string `json:"password"`
-	Email	string	`json:"email"`
+	Password 			string 		`json:"password"`
+	Email				string		`json:"email"`
+	ExpiresInSeconds	int			`json:"expires_in_seconds"`
 }
 
 
@@ -101,14 +104,13 @@ func profanityFilter(s string) string {
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 	type chirpValid struct {
 		Body 	string 		`json:"body"`
-		UserID 	uuid.UUID 	`json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(req.Body)
 	c := chirpValid{}
 	err := decoder.Decode(&c)
 	if err != nil {
-		respondWithError(w, 400, "An occured when decoding the Chirp")
+		respondWithError(w, 400, "An error occured when decoding the Chirp")
 		return
 	}
 
@@ -117,11 +119,24 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	headers := req.Header
+	token, err := auth.GetBearerToken(headers)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when retrieving the bearer token")
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when validating the bearer token")
+		return
+	}
+
 	cleanText := profanityFilter(c.Body)
 
 	params := database.CreateChirpParams{
 		Body: cleanText,
-		UserID: c.UserID,
+		UserID: id,
 	}
 
 	createdChirp, err := cfg.dbQueries.CreateChirp(req.Context(), params)
@@ -135,7 +150,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 		CreatedAt: createdChirp.CreatedAt,
 		UpdatedAt: createdChirp.UpdatedAt,
 		Body:	   createdChirp.Body,
-		UserID:	   createdChirp.UserID,
+		UserID:	   id,
 	}
 
 	respondWithJSON(w, 201, respBody)
@@ -262,6 +277,13 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		respondWithError(w, 400, "An error occured when decoding the user's email")
 		return
 	}
+	
+	expiresInSeconds := c.ExpiresInSeconds * int(time.Second)
+	expiresIn := 1 * int(time.Hour)
+
+	if expiresInSeconds != 0 && expiresInSeconds <= (1 * int(time.Hour)) {
+		expiresIn = expiresInSeconds
+	}
 
 	user, err := cfg.dbQueries.FindUserByEmail(req.Context(), c.Email)
 	if err != nil {
@@ -275,11 +297,18 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		return
 	}
 
+	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(expiresIn))
+	if err != nil {
+		respondWithError(w, 401, "Error occurred creating JWT")
+		return
+	}
+
 	u := User{
 		ID:		   		user.ID,
 		CreatedAt: 		user.CreatedAt,
 		UpdatedAt: 		user.UpdatedAt,
 		Email:	   		user.Email,
+		Token:			token,
 	}
 	respondWithJSON(w, 200, u)
 }
@@ -296,6 +325,7 @@ func main() {
 	cfg := apiConfig{}
 	cfg.dbQueries = dbQueries
 	cfg.platform = os.Getenv("PLATFORM")
+	cfg.secret = os.Getenv("SECRET")
 	
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))

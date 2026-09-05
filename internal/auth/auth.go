@@ -6,6 +6,9 @@ import (
 	"github.com/alexedwards/argon2id"
 	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"net/http"
+	"strings"
+	"errors"
 )
 
 type CustomClaims struct {
@@ -54,18 +57,29 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return []byte(tokenSecret), nil
 	})
 	if err != nil {
-		return uuid.New(), err
+		return uuid.Nil, err
 	}
 
 	userID, err := token.Claims.GetSubject()
 	if err != nil {
-		return uuid.New(), err
+		return uuid.Nil, err
 	}
 
 	returnedID, err := uuid.Parse(userID)
 	if err != nil {
-		return uuid.New(), err
+		return uuid.Nil, err
 	}
 
 	return returnedID, err
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if auth != "" {
+		_, tokenString, found := strings.Cut(auth, "Bearer ")
+		if found {
+			return tokenString, nil
+		}
+	}
+	return "", errors.New("authorization header does not exist in this request")
 }
