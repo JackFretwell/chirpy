@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"errors"
+	"crypto/rand"
+	"encoding/hex"
 )
 
 type CustomClaims struct {
@@ -33,12 +35,12 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 	return match, err
 }
 
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
 	claims := CustomClaims{
 		jwt.RegisteredClaims{
 			Issuer:		"chirpy-access",
 			IssuedAt:	jwt.NewNumericDate(time.Now()),
-			ExpiresAt:	jwt.NewNumericDate(time.Now().Add(expiresIn)),
+			ExpiresAt:	jwt.NewNumericDate(time.Now().Add(time.Hour * 1)),
 			Subject:	userID.String(),
 		},
 	}
@@ -82,4 +84,11 @@ func GetBearerToken(headers http.Header) (string, error) {
 		}
 	}
 	return "", errors.New("authorization header does not exist in this request")
+}
+
+func MakeRefreshToken() string {
+	key := make([]byte, 32)
+	rand.Read(key)
+	refreshToken := hex.EncodeToString(key)
+	return refreshToken
 }

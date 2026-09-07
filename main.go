@@ -26,11 +26,12 @@ type apiConfig struct {
 }
 
 type User struct {
-	ID			uuid.UUID `json:"id"`
-	CreatedAt	time.Time `json:"created_at"`
-	UpdatedAt	time.Time `json:"updated_at"`
-	Email		string	  `json:"email"`
-	Token		string	  `json:"token"`
+	ID				uuid.UUID `json:"id"`
+	CreatedAt		time.Time `json:"created_at"`
+	UpdatedAt		time.Time `json:"updated_at"`
+	Email			string	  `json:"email"`
+	Token			string	  `json:"token"`
+	RefreshToken	string	  `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -44,7 +45,6 @@ type Chirp struct {
 type createUserParams struct {
 	Password 			string 		`json:"password"`
 	Email				string		`json:"email"`
-	ExpiresInSeconds	int			`json:"expires_in_seconds"`
 }
 
 
@@ -128,7 +128,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, req *http.Request) {
 
 	id, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
-		respondWithError(w, 400, "An error occured when validating the bearer token")
+		respondWithError(w, 401, "An error occured when validating the bearer token")
 		return
 	}
 
@@ -278,12 +278,7 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		return
 	}
 	
-	expiresInSeconds := c.ExpiresInSeconds * int(time.Second)
-	expiresIn := 1 * int(time.Hour)
-
-	if expiresInSeconds != 0 && expiresInSeconds <= (1 * int(time.Hour)) {
-		expiresIn = expiresInSeconds
-	}
+	//expiresIn := 1 * int(time.Hour)
 
 	user, err := cfg.dbQueries.FindUserByEmail(req.Context(), c.Email)
 	if err != nil {
@@ -297,9 +292,21 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		return
 	}
 
-	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(expiresIn))
+	jwt, err := auth.MakeJWT(user.ID, cfg.secret)
 	if err != nil {
 		respondWithError(w, 401, "Error occurred creating JWT")
+		return
+	}
+
+	refreshToken := auth.MakeRefreshToken()
+	params := database.CreateRefreshTokenParams{
+		Token: refreshToken,
+		UserID: user.ID,
+	}
+
+	_, err = cfg.dbQueries.CreateRefreshToken(req.Context(), params)
+	if err != nil {
+		respondWithError(w, 401, "Error occurred creating refresh token")
 		return
 	}
 
@@ -308,10 +315,71 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		CreatedAt: 		user.CreatedAt,
 		UpdatedAt: 		user.UpdatedAt,
 		Email:	   		user.Email,
-		Token:			token,
+		Token:			jwt,
+		RefreshToken:   refreshToken,
 	}
 	respondWithJSON(w, 200, u)
 }
+
+func (cfg *apiConfig) refresh(w http.ResponseWriter, req *http.Request) {
+	type refreshToken struct{
+		Token	string	`json:"token"`
+	}
+
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, 401, "An error occured when retrieving the bearer token")
+		return
+	}
+
+
+	rToken, err := cfg.dbQueries.GetUserFromRefreshToken(req.Context(), token)
+	if err != nil {
+		respondWithError(w, 401, "Could not find the given refresh token in our database")
+		return
+	}
+
+	if rToken.ExpiresAt.Compare(time.Now()) < 0 || rToken.RevokedAt.Valid {
+		respondWithError(w, 401, "The given token has expired or been revoked")
+		return
+	}
+
+	jwt, err := auth.MakeJWT(rToken.UserID, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "Error occurred creating JWT")
+		return
+	}
+
+	r := refreshToken{
+		Token: jwt,
+	}
+
+	respondWithJSON(w, 200, r)
+ 
+}
+
+func (cfg *apiConfig) revoke(w http.ResponseWriter, req *http.Request) {
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, 401, "An error occured when retrieving the bearer token")
+		return
+	}
+
+	refreshToken, err := cfg.dbQueries.GetUserFromRefreshToken(req.Context(), token)
+	if err != nil {
+		respondWithError(w, 401, "Could not find the given refresh token in our database")
+		return
+	}
+
+	err = cfg.dbQueries.UpdateRevokedAtField(req.Context(), refreshToken.Token)
+	if err != nil {
+		respondWithError(w, 401, "Could not successfully revoke the refresh token")
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
 
 func main() {
 	godotenv.Load()
@@ -335,6 +403,8 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveSpecificChirp)
 	mux.HandleFunc("POST /api/login", cfg.userLogin)
+	mux.HandleFunc("POST /api/refresh", cfg.refresh)
+	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
