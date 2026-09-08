@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 	"os"
+	"sort"
 	"database/sql"
 	"github.com/joho/godotenv"
 	"github.com/JackFretwell/chirpy/internal/database"
@@ -231,6 +232,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
 
 func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 	s:= req.URL.Query().Get("author_id")
+	sortType := req.URL.Query().Get("sort")
 
 	if s != "" {
 		authorID, err := uuid.Parse(s)
@@ -243,6 +245,11 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 			respondWithError(w, 400, "An error occured when retrieving chirps")
 			return
 		}
+
+		if sortType == "desc" {
+			sort.Slice(chirps, func(i, j int) bool {return chirps[i].CreatedAt.After(chirps[j].CreatedAt)})
+		}
+
 		chirpArray := make([]Chirp, len(chirps))
 
 		for i := 0; i < len(chirps); i++ {
@@ -263,6 +270,11 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 			respondWithError(w, 400, "An error occured when retrieving chirps")
 			return
 		}
+
+		if sortType == "desc" {
+			sort.Slice(chirps, func(i, j int) bool {return chirps[i].CreatedAt.After(chirps[j].CreatedAt)})
+		}
+
 		chirpArray := make([]Chirp, len(chirps))
 
 		for i := 0; i < len(chirps); i++ {
@@ -275,6 +287,8 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 			}
 			chirpArray[i] = c
 		}
+
+
 		respondWithJSON(w, 200, chirpArray)
 	}
 }
