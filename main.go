@@ -32,6 +32,7 @@ type User struct {
 	Email			string	  `json:"email"`
 	Token			string	  `json:"token"`
 	RefreshToken	string	  `json:"refresh_token"`
+	IsChirpyRed		bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -221,6 +222,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
 		CreatedAt: 		createdUser.CreatedAt,
 		UpdatedAt: 		createdUser.UpdatedAt,
 		Email:	   		createdUser.Email,
+		IsChirpyRed:	createdUser.IsChirpyRed,
 	}
 
 	respondWithJSON(w, 201, u)
@@ -315,6 +317,7 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		Email:	   		user.Email,
 		Token:			jwt,
 		RefreshToken:   refreshToken,
+		IsChirpyRed:	user.IsChirpyRed,
 	}
 	respondWithJSON(w, 200, u)
 }
@@ -427,6 +430,7 @@ func (cfg *apiConfig) userUpdate(w http.ResponseWriter, req *http.Request) {
 		CreatedAt: 		user.CreatedAt,
 		UpdatedAt: 		user.UpdatedAt,
 		Email:	   		user.Email,
+		IsChirpyRed:	user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, 200, u)
@@ -468,6 +472,35 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (cfg *apiConfig) upgradeUser(w http.ResponseWriter, req *http.Request) {
+	type upgradeRequest struct {
+		Event	string	`json:"event"`
+		Data 	struct {
+			UserID	uuid.UUID	`json:"user_id"`
+		} `json:"data"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	upgradeReq := upgradeRequest{}
+	err := decoder.Decode(&upgradeReq)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when decoding the user upgrade request body")
+		return
+	}
+
+	if upgradeReq.Event != "user.upgraded" {
+		w.WriteHeader(204)
+	}
+
+	err = cfg.dbQueries.UpgradeUserToChirpyRed(req.Context(), upgradeReq.Data.UserID)
+	if err != nil {
+		respondWithError(w, 404, "An error occured when decoding the user upgrade request body")
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
 
 func main() {
 	godotenv.Load()
@@ -495,6 +528,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 	mux.HandleFunc("PUT /api/users", cfg.userUpdate)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.deleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", cfg.upgradeUser)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
@@ -506,6 +540,5 @@ func main() {
 		WriteTimeout:	10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-	//log.Printf("Serving files from %s on port: %s\n", )
 	log.Fatal(s.ListenAndServe())
 }
