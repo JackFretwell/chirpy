@@ -432,6 +432,42 @@ func (cfg *apiConfig) userUpdate(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, 200, u)
 }
 
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, req *http.Request) {
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, 401, "An error occured when retrieving the bearer token")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "Unable to validate the users access token")
+		return
+	}
+
+	chirpID := req.PathValue("chirpID")
+	uuid, _ := uuid.Parse(chirpID)
+
+	chirp, err := cfg.dbQueries.RetrieveChirp(req.Context(), uuid)
+	if err != nil {
+		respondWithError(w, 404, "Chirp does not exist")
+		return
+	}
+
+	if chirp.UserID != userID {
+		respondWithError(w, 403, "This user is not the author of the given chirp")
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirp(req.Context(), uuid)
+	if err != nil {
+		respondWithError(w, 400, "An error occurred when deleting the chirp")
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
 
 func main() {
 	godotenv.Load()
@@ -458,6 +494,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", cfg.refresh)
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 	mux.HandleFunc("PUT /api/users", cfg.userUpdate)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.deleteChirp)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
