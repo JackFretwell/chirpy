@@ -20,9 +20,10 @@ import _ "github.com/lib/pq"
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	dbQueries *database.Queries
-	platform string
-	secret string
+	dbQueries 	   *database.Queries
+	platform 	   string
+	secret 		   string
+	polkaKey       string
 }
 
 type User struct {
@@ -480,9 +481,20 @@ func (cfg *apiConfig) upgradeUser(w http.ResponseWriter, req *http.Request) {
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetAPIKey(req.Header)
+	if err != nil {
+		respondWithError(w, 401, "An error occured when trying to retrieve the API Key from the requests header")
+		return
+	}
+
+	if apiKey != cfg.polkaKey {
+		respondWithError(w, 401, "The given API Key does not match our authorised Key")
+		return
+	}
+
 	decoder := json.NewDecoder(req.Body)
 	upgradeReq := upgradeRequest{}
-	err := decoder.Decode(&upgradeReq)
+	err = decoder.Decode(&upgradeReq)
 	if err != nil {
 		respondWithError(w, 400, "An error occured when decoding the user upgrade request body")
 		return
@@ -515,6 +527,7 @@ func main() {
 	cfg.dbQueries = dbQueries
 	cfg.platform = os.Getenv("PLATFORM")
 	cfg.secret = os.Getenv("SECRET")
+	cfg.polkaKey = os.Getenv("POLKA_KEY")
 	
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
