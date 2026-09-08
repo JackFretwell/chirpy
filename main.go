@@ -230,27 +230,55 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, req *http.Request) {
 }
 
 func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
-	chirps, err := cfg.dbQueries.RetrieveChirps(req.Context())
-	if err != nil {
-		respondWithError(w, 400, "An error occured when retrieving chirps")
-		return
-	}
+	s:= req.URL.Query().Get("author_id")
 
-	chirpArray := make([]Chirp, len(chirps))
-
-	for i := 0; i < len(chirps); i++ {
-		c := Chirp{
-			ID: 	   chirps[i].ID,
-			CreatedAt: chirps[i].CreatedAt,
-			UpdatedAt: chirps[i].UpdatedAt,
-			Body:	   chirps[i].Body,
-			UserID:	   chirps[i].UserID,
+	if s != "" {
+		authorID, err := uuid.Parse(s)
+		if err != nil {
+			respondWithError(w, 400, "An error occured when parsing the given ID")
+			return
 		}
-		chirpArray[i] = c
+		chirps, err := cfg.dbQueries.RetrieveChirpsByAuthorID(req.Context(), authorID)
+		if err != nil {
+			respondWithError(w, 400, "An error occured when retrieving chirps")
+			return
+		}
+		chirpArray := make([]Chirp, len(chirps))
+
+		for i := 0; i < len(chirps); i++ {
+			c := Chirp{
+				ID: 	   chirps[i].ID,
+				CreatedAt: chirps[i].CreatedAt,
+				UpdatedAt: chirps[i].UpdatedAt,
+				Body:	   chirps[i].Body,
+				UserID:	   chirps[i].UserID,
+			}
+			chirpArray[i] = c
+		}
+
+		respondWithJSON(w, 200, chirpArray)
+	} else {
+		chirps, err := cfg.dbQueries.RetrieveChirps(req.Context())
+		if err != nil {
+			respondWithError(w, 400, "An error occured when retrieving chirps")
+			return
+		}
+		chirpArray := make([]Chirp, len(chirps))
+
+		for i := 0; i < len(chirps); i++ {
+			c := Chirp{
+				ID: 	   chirps[i].ID,
+				CreatedAt: chirps[i].CreatedAt,
+				UpdatedAt: chirps[i].UpdatedAt,
+				Body:	   chirps[i].Body,
+				UserID:	   chirps[i].UserID,
+			}
+			chirpArray[i] = c
+		}
+		respondWithJSON(w, 200, chirpArray)
 	}
-	
-	respondWithJSON(w, 200, chirpArray)
 }
+
 
 func (cfg *apiConfig) retrieveSpecificChirp(w http.ResponseWriter, req *http.Request){
 	chirpID := req.PathValue("chirpID")
