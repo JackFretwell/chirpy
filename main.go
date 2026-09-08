@@ -278,8 +278,6 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request){
 		return
 	}
 	
-	//expiresIn := 1 * int(time.Hour)
-
 	user, err := cfg.dbQueries.FindUserByEmail(req.Context(), c.Email)
 	if err != nil {
 		respondWithError(w, 401, "Incorrect email or password")
@@ -380,6 +378,60 @@ func (cfg *apiConfig) revoke(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (cfg *apiConfig) userUpdate(w http.ResponseWriter, req *http.Request) {
+	type updateRequest struct {
+		Password	string		`json:"password"`
+		Email		string		`json:"email"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	updateReq := updateRequest{}
+	err := decoder.Decode(&updateReq)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when decoding the user update request body")
+		return
+	}
+
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, 401, "An error occured when retrieving the bearer token")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "Unable to validate the users access token")
+		return
+	}
+
+	hash, err := auth.HashPassword(updateReq.Password)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when hashing the given password")
+		return
+	}
+
+	params := database.UpdateUsersEmailPasswordParams{
+		Email: updateReq.Email,
+		HashedPassword: hash,
+		ID: userID,
+	}
+
+	user, err := cfg.dbQueries.UpdateUsersEmailPassword(req.Context(), params)
+	if err != nil {
+		respondWithError(w, 400, "An error occured when updating the database record")
+		return
+	}
+
+	u := User{
+		ID:		   		user.ID,
+		CreatedAt: 		user.CreatedAt,
+		UpdatedAt: 		user.UpdatedAt,
+		Email:	   		user.Email,
+	}
+
+	respondWithJSON(w, 200, u)
+}
+
 
 func main() {
 	godotenv.Load()
@@ -405,6 +457,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", cfg.userLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.refresh)
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
+	mux.HandleFunc("PUT /api/users", cfg.userUpdate)
 
 	mux.HandleFunc("POST /admin/reset", cfg.resetFileserverHits)
 	mux.HandleFunc("GET /admin/metrics", cfg.writeNumberOfRequests)
